@@ -10,16 +10,15 @@ import "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Utils.sol";
 import "@openzeppelin/contracts-upgradeable/utils/cryptography/ECDSAUpgradeable.sol";
 
-abstract contract SecureSmartWalletBase is 
+abstract contract SecureSmartWalletBase is
     Initializable,
     UUPSUpgradeable,
-    ReentrancyGuardUpgradeable 
+    ReentrancyGuardUpgradeable
 {
     // ========== Library Usage ========== //
     using AddressUpgradeable for address;
     using ECDSAUpgradeable for bytes32;
     
-
     // ========== Core Dependencies ========== //
     IEntryPoint public immutable entryPoint;
     uint256 public immutable CHAIN_ID;
@@ -158,11 +157,23 @@ abstract contract SecureSmartWalletBase is
         for (uint256 i = 0; i < _guardians.length; i++) {
             address guardian = _guardians[i];
             require(guardian != address(0), "SecureSmartWallet: invalid guardian");
+            guardianConfig.isActive[guardian] = true;
             emit GuardianStatusUpdated(guardian, true);
         }
     
         lastSecurityUpdate = block.timestamp;
         emit WalletInitialized(_owners, _guardians, _guardianThreshold);
+    }
+
+    // ========== UUPS Upgrade Authorization ========== //
+    function _authorizeUpgrade(address newImplementation) 
+        internal 
+        override 
+        onlyOwner 
+    {
+        require(newImplementation != address(0), "Invalid implementation");
+        require(newImplementation != address(this), "Cannot upgrade to self");
+        // Tambahan validasi bisa ditambahkan di sini
     }
 
     // ========== Ownership Management ========== //
@@ -171,12 +182,12 @@ abstract contract SecureSmartWalletBase is
         require(newOwners.length <= MAX_OWNERS, "Too many owners");
     
         // Clear old owners
-    for (uint256 i = 0; i < owners.length; ) {
-        address oldOwner = owners[i];
-        isOwner[oldOwner] = false;
-        emit OwnerStatusUpdated(oldOwner, false);
-        unchecked { i++; }
-    }
+        for (uint256 i = 0; i < owners.length; ) {
+            address oldOwner = owners[i];
+            isOwner[oldOwner] = false;
+            emit OwnerStatusUpdated(oldOwner, false);
+            unchecked { i++; }
+        }
     
         // Set new owners
         owners = newOwners;
@@ -230,7 +241,6 @@ abstract contract SecureSmartWalletBase is
         emit GuardiansUpdated(newGuardians, newThreshold);
     }
 
-        // Guardian Active (fixed):
     function _isActiveGuardian(address guardian) internal view returns (bool) {
         return guardianConfig.isActive[guardian] && guardian != address(0);
     }
@@ -298,7 +308,6 @@ abstract contract SecureSmartWalletBase is
     }
 
     // ========== Upgrade Management ========== //
-
     function executeUpgrade() external onlyOwner {
         require(pendingImplementation != address(0), "No upgrade scheduled");
         require(block.timestamp >= upgradeActivationTime, "Upgrade delay not passed");
@@ -329,13 +338,7 @@ abstract contract SecureSmartWalletBase is
     function cancelUpgrade() external onlyOwner {
         require(pendingImplementation != address(0), "No upgrade scheduled");
         
-        address pendingImpl = pendingImplementation;
-        bytes32 codeHash;
-        assembly {
-            codeHash := extcodehash(pendingImpl)
-        }
-        
-        address cancelledImplementation = pendingImpl;
+        address cancelledImplementation = pendingImplementation;
         pendingImplementation = address(0);
         upgradeActivationTime = 0;
         emit UpgradeCancelled(cancelledImplementation);
@@ -347,9 +350,9 @@ abstract contract SecureSmartWalletBase is
 
     // ========== Internal Functions ========== //
     function _validateSignature(bytes32 hash, bytes memory signature) internal view returns (bool) {
-        return isOwner[hash.recover(signature)];
+        return isOwner[ECDSAUpgradeable.recover(hash, signature)];
     }
 
     // ========== Storage Gap ========== //
-    uint256[50] private __gap;    
+    uint256[50] private __gap;
 }
