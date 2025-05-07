@@ -35,20 +35,25 @@ abstract contract SecureSmartWalletEmergency is SecureSmartWalletBase {
     event TokenRevoked(address indexed token, address indexed maliciousContract, string tokenStandard);
     event TokenRevokeFailed(address indexed token, address indexed maliciousContract, string reason);
 
+    // ========== Initializer ========== //
+    function __SecureSmartWalletEmergency_init() internal onlyInitializing {
+        // Initialize emergency state if needed
+    }
+
     // ========== Modified Emergency Functions ========== //
     function createEmergencyRequest(
         address[] calldata tokens,
         address[] calldata maliciousContracts
     ) external onlyGuardian {
-        require(tokens.length == maliciousContracts.length, "Array length mismatch");
-        require(tokens.length <= 50, "Max 50 tokens per request");
+        require(tokens.length == maliciousContracts.length, "SecureSmartWallet: array length mismatch");
+        require(tokens.length <= MAX_BATCH_SIZE, "SecureSmartWallet: max tokens exceeded");
 
         for (uint256 i = 0; i < tokens.length; i++) {
-            require(tokens[i].isContract(), "Token must be contract");
+            require(tokens[i].isContract(), "SecureSmartWallet: token must be contract");
             require(
                 maliciousContracts[i] != address(this) &&
                 maliciousContracts[i] != address(entryPoint),
-                "Protected contract"
+                "SecureSmartWallet: protected contract"
             );
         }
 
@@ -62,7 +67,7 @@ abstract contract SecureSmartWalletEmergency is SecureSmartWalletBase {
         });
         
         emit EmergencyRequestCreated(requestId, msg.sender);
-    } //
+    }
 
     /**
      * @dev Executes an emergency request in batches
@@ -72,7 +77,7 @@ abstract contract SecureSmartWalletEmergency is SecureSmartWalletBase {
         uint256 batchSize
     ) external onlyGuardian whenNotLocked nonReentrant {
         require(requestId < emergencyRequestCount, "SecureSmartWallet: invalid request ID");
-        require(batchSize > 0 && batchSize <= 50, "SecureSmartWallet: invalid batch size");
+        require(batchSize > 0 && batchSize <= MAX_BATCH_SIZE, "SecureSmartWallet: invalid batch size");
         
         EmergencyRequest storage request = emergencyRequests[requestId];
         
@@ -144,7 +149,7 @@ abstract contract SecureSmartWalletEmergency is SecureSmartWalletBase {
     }
     
     function isERC721(address token) internal view returns (bool) {
-        bytes4 erc721Interface = 0x80ac58cd;
+        bytes4 erc721Interface = type(IERC721Upgradeable).interfaceId;
         try IERC165(token).supportsInterface(erc721Interface) returns (bool supported) {
             return supported;
         } catch {
@@ -153,7 +158,7 @@ abstract contract SecureSmartWalletEmergency is SecureSmartWalletBase {
     }
     
     function isERC1155(address token) internal view returns (bool) {
-        bytes4 erc1155Interface = 0xd9b67a26;
+        bytes4 erc1155Interface = type(IERC1155).interfaceId;
         try IERC165(token).supportsInterface(erc1155Interface) returns (bool supported) {
             return supported;
         } catch {
@@ -169,7 +174,7 @@ abstract contract SecureSmartWalletEmergency is SecureSmartWalletBase {
         
         if (!success || (data.length > 0 && !abi.decode(data, (bool)))) {
             emit TokenRevokeFailed(token, spender, "ERC20 revoke failed");
-            revert("ERC20 revoke failed");
+            revert("SecureSmartWallet: ERC20 revoke failed");
         }
     }
     
@@ -180,7 +185,7 @@ abstract contract SecureSmartWalletEmergency is SecureSmartWalletBase {
         
         if (!success || (data.length > 0 && !abi.decode(data, (bool)))) {
             emit TokenRevokeFailed(token, operator, "ERC721 revoke failed");
-            revert("ERC721 revoke failed");
+            revert("SecureSmartWallet: ERC721 revoke failed");
         }
     }
     
@@ -191,7 +196,7 @@ abstract contract SecureSmartWalletEmergency is SecureSmartWalletBase {
         
         if (!success || (data.length > 0 && !abi.decode(data, (bool)))) {
             emit TokenRevokeFailed(token, operator, "ERC1155 revoke failed");
-            revert("ERC1155 revoke failed");
+            revert("SecureSmartWallet: ERC1155 revoke failed");
         }
     }
     
