@@ -62,7 +62,7 @@ abstract contract SecureSmartWalletEmergency is SecureSmartWalletBase {
         });
         
         emit EmergencyRequestCreated(requestId, msg.sender);
-    } // <-- Penutup fungsi yang hilang ditambahkan di sini
+    } //
 
     /**
      * @dev Executes an emergency request in batches
