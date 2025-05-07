@@ -13,6 +13,7 @@ import "./SecureSmartWalletSignatures.sol";
  * @author DFXC Indonesian Security Web3 Project - Dev DayuWidayadi
  * @dev Main contract that combines all wallet functionality through inheritance
  */
+
 contract SecureSmartWallet is 
     Initializable,
     SecureSmartWalletBase,
@@ -30,9 +31,7 @@ contract SecureSmartWallet is
     event ETHReceived(address indexed sender, uint256 amount);
 
     // ========== Constructor ========== //
-    constructor(IEntryPoint _entryPoint) 
-        SecureSmartWalletBase(_entryPoint) 
-    {
+    constructor(IEntryPoint _entryPoint) SecureSmartWalletBase(_entryPoint) {
         _disableInitializers();
     }
 
@@ -41,19 +40,34 @@ contract SecureSmartWallet is
         address[] calldata _owners,
         address[] calldata _guardians,
         uint256 _guardianThreshold
-    ) external initializer override {
+    ) external initializer {
         __SecureSmartWalletBase_init(_owners, _guardians, _guardianThreshold);
+        // Jika parent contracts memiliki initializer:
+        // __SecureSmartWalletEmergency_init();
+        // __SecureSmartWalletSignatures_init();
     }
 
     // ========== ERC-1271 Compliance ========== //
-    function isValidSignature(
-        bytes32 hash, 
-        bytes memory signature
-    ) external view override returns (bytes4) {
+    function isValidSignature(bytes32 hash, bytes memory signature) 
+        external 
+        view 
+        override 
+        returns (bytes4) 
+    {
         if (_isLocked) return bytes4(0xffffffff);
         return (_validateSignature(hash, signature) || _validateGuardianSignature(hash, signature))
             ? bytes4(0x1626ba7e)
             : bytes4(0xffffffff);
+    }
+
+    // ========== UUPS Upgrade Authorization ========== //
+    function _authorizeUpgrade(address newImplementation) 
+        internal 
+        override(UUPSUpgradeable)  // PERBAIKAN: Ganti ke UUPSUpgradeable
+        onlyOwner 
+    {
+        require(newImplementation != address(0), "Invalid implementation");
+        require(newImplementation != address(this), "Cannot upgrade to self");
     }
 
     // ========== Fallback & Receive ========== //
@@ -61,22 +75,12 @@ contract SecureSmartWallet is
         emit ETHReceived(msg.sender, msg.value);
     }
 
-    // ========== UUPS Upgrade Authorization ========== //
-    function _authorizeUpgrade(address newImplementation) 
-        internal 
-        override(SecureSmartWalletBase)
-        onlyOwner 
-    {
-        require(newImplementation != address(0), "Invalid implementation");
-        require(newImplementation != address(this), "Cannot upgrade to self");
-    }
-    
-    // ========== SecureSmartWalletFactory ========== //
+    // ========== Factory Management ========== //
     function setFactory(address _factory) external onlyOwner {
         require(factory == address(0), "Factory already set");
         factory = _factory;
         emit FactoryUpdated(_factory);
-    }    
+    }
 
     // ========== Storage Gap ========== //
     uint256[50] private __gap;
