@@ -50,13 +50,18 @@ abstract contract SecureSmartWalletFactoryBase {
         );
         
         bytes32 salt = keccak256(initData);
-        return address(uint160(uint(keccak256(abi.encodePacked(
+        
+        bytes memory creationCode = abi.encodePacked(
+            type(ERC1967Proxy).creationCode,
+            abi.encode(walletImplementation, initData)
+        );
+        
+        bytes32 hash = keccak256(abi.encodePacked(
             bytes1(0xff),
             address(this),
             salt,
-            keccak256(abi.encodePacked(
-                type(ERC1967Proxy).creationCode,
-                abi.encode(walletImplementation, initData)
-            ))
-        ))))));
+            keccak256(creationCode)
+        );
+        
+        return address(uint160(uint(hash)));
     }
