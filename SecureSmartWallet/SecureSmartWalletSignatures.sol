@@ -169,7 +169,7 @@ abstract contract SecureSmartWalletSignatures is SecureSmartWalletBase {
                 "Invalid contract signature"
             );
         }
-    }
+    }    
 
     // ========== UserOp Validation ========== //
 
@@ -262,9 +262,16 @@ abstract contract SecureSmartWalletSignatures is SecureSmartWalletBase {
                (uint256(validAfter) << 160) | 
                (uint256(validUntil) << (160 + 48));
     }
+
+    function _validateGuardianSignature(
+        bytes32 hash, 
+        bytes memory signature
+    ) internal view returns (bool) {
+        address signer = hash.toEthSignedMessageHash().recover(signature);
+        return (guardianConfig.isGuardian[signer] && _isActiveGuardian(signer));
+    }
     
-    
-        function getPendingOperation(bytes32 opHash) public view returns (
+    function getPendingOperation(bytes32 opHash) public view returns (
         bytes32,
         address,
         uint256,
@@ -272,7 +279,8 @@ abstract contract SecureSmartWalletSignatures is SecureSmartWalletBase {
         bytes memory
     ) {
         PendingOperation memory op = pendingOperations[opHash];
-        return (op.opHash, op.initiator, op.executeAfter, op.executed, op.callData);
+        return (op.opHash, op.initiator, op.executeAfter, op.executed, op.callData);        
+        require(op.opHash != 0, "Operation does not exist");
     }
     
         // ========== Storage Gap ========== //
