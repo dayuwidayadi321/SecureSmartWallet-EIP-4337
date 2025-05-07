@@ -5,7 +5,7 @@ import "./SecureSmartWalletBase.sol";
 import "@openzeppelin/contracts-upgradeable/utils/cryptography/ECDSAUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/cryptography/MessageHashUtilsUpgradeable.sol";
 import "@account-abstraction/contracts/interfaces/UserOperation.sol";
-import "@openzeppelin/contracts-upgradeable/interfaces/IERC1271Upgradeable.sol";i
+import "@openzeppelin/contracts-upgradeable/interfaces/IERC1271Upgradeable.sol";
 
 /**
  * @title SecureSmartWalletSignatures - Signature verification and operations
