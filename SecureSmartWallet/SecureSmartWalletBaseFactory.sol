@@ -58,6 +58,5 @@ abstract contract SecureSmartWalletFactoryBase {
                 type(ERC1967Proxy).creationCode,
                 abi.encode(walletImplementation, initData)
             ))
-        )));
+        ))))));
     }
-}
