@@ -106,7 +106,7 @@ contract SecureSmartWalletFactory {
             address(this),
             salt,
             keccak256(creationCode)
-        );
+        ));
         
         return address(uint160(uint256(hash)));
     }
