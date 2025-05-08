@@ -77,12 +77,6 @@ contract SecureSmartWallet is
         emit ETHReceived(msg.sender, msg.value);
     }
 
-    function setFactory(address _factory) external onlyOwner {
-        require(factory == address(0), "Factory already set");
-        factory = _factory;
-        emit FactoryUpdated(_factory);
-    }
-
     uint256[50] private __gap;
 }
 
