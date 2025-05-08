@@ -44,7 +44,7 @@ SecureSmartWallet/
 
 ### 2. Compile Contracts
 1. Go to the `Solidity Compiler` tab
-2. Select compiler version `0.8.19`
+2. Select compiler version `0.8.19 Recomended 0.8.29`
 3. Enable optimization (200 runs)
 4. Click `Compile SecureSmartWallet.sol`
 
