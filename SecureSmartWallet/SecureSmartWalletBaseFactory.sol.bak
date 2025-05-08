@@ -1,0 +1,67 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
+
+import "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import "./SecureSmartWalletBase.sol";
+
+abstract contract SecureSmartWalletFactoryBase {
+    address public immutable walletImplementation;
+    uint256 public immutable CHAIN_ID;
+    
+    event WalletDeployed(address indexed wallet, address[] owners, address[] guardians, uint256 threshold);
+    
+    constructor(address _implementation) {
+        walletImplementation = _implementation;
+        CHAIN_ID = block.chainid;
+    }
+    
+    function _deployWallet(
+        address[] calldata owners,
+        address[] calldata guardians,
+        uint256 guardianThreshold,
+        bytes memory initData
+    ) internal returns (address wallet) {
+        wallet = address(new ERC1967Proxy(
+            walletImplementation,
+            abi.encodeWithSelector(
+                SecureSmartWalletBase.initialize.selector,
+                owners,
+                guardians,
+                guardianThreshold
+            )
+        ));
+        
+        // Set factory address on the new wallet
+        SecureSmartWalletBase(wallet).setFactory(address(this));
+        
+        emit WalletDeployed(wallet, owners, guardians, guardianThreshold);
+    }
+    
+    function _predictWalletAddress(
+        address[] calldata owners,
+        address[] calldata guardians,
+        uint256 guardianThreshold
+    ) internal view returns (address) {
+        bytes memory initData = abi.encodeWithSelector(
+            SecureSmartWalletBase.initialize.selector,
+            owners,
+            guardians,
+            guardianThreshold
+        );
+        
+        bytes32 salt = keccak256(initData);
+        
+        bytes memory creationCode = abi.encodePacked(
+            type(ERC1967Proxy).creationCode,
+            abi.encode(walletImplementation, initData)
+        );
+        
+        bytes32 hash = keccak256(abi.encodePacked(
+            bytes1(0xff),
+            address(this),
+            salt,
+            keccak256(creationCode)
+        );
+        
+        return address(uint160(uint(hash)));
+    }
