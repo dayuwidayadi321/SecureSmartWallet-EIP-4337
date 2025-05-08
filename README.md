@@ -30,9 +30,8 @@ SecureSmartWallet/
 │   └── dependencies/        # Optional for imported contracts
 ├── scripts/                 # Deployment scripts
 ├── test/                    # Test files
-├── README.md                # Your documentation file (can stay here)
+├── README.md                # Project documentation
 └── .gitignore              # Git ignore file
-
 
 
 ## Deployment Guide (Using Remix IDE)
