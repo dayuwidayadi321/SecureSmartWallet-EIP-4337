@@ -368,6 +368,12 @@ abstract contract SecureSmartWalletBase is
         return isOwner[ECDSAUpgradeable.recover(hash, signature)];
     }
 
+    function setFactory(address _factory) external {
+        require(factory == address(0), "Factory already set");
+        factory = _factory;
+        emit FactoryUpdated(_factory);
+    }    
+
     // ========== Storage Gap ========== //
     uint256[50] private __gap;
 }
