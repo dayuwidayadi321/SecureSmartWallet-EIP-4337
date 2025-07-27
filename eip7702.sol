@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-/**
- * @title HybridEOADelegateV3
- * @notice Smart delegation contract designed for EIP-7702,
- * with EIP-4337-inspired features for Hybrid Account Abstraction.
- * Empowers EOAs with smart account functionalities.
- */
-contract HybridEOADelegateV3 {
+contract HybridEOADelegateV4 {
     address public immutable delegatedEOA;
 
     mapping(address => bool) public isGuardian;
@@ -18,27 +12,22 @@ contract HybridEOADelegateV3 {
     uint256 private _recoveryVoteCount;
     address private _proposedNewEOAOwner;
 
-    uint256 public dailyLimit;
-    uint256 public lastResetDay;
-    uint256 public spentToday;
-
     address public approvedSponsor;
+    bool public initialized;
 
     event GuardianAdded(address indexed guardian);
     event GuardianRemoved(address indexed guardian);
     event RecoveryProposed(address indexed newOwner, uint256 votes);
     event RecoverySuccessful(address indexed oldOwner, address indexed newOwner);
-    event DailyLimitSet(uint256 newLimit);
     event SponsorSet(address indexed sponsor);
-    event SpendingRecorded(uint256 amountSpent);
+    event Initialized(address indexed initializer);
 
     constructor(address _initialDelegatedEOA, uint256 _initialRecoveryThreshold) {
         require(_initialDelegatedEOA != address(0), "Delegated EOA cannot be zero.");
         require(_initialRecoveryThreshold > 0, "Recovery threshold must be greater than zero.");
         delegatedEOA = _initialDelegatedEOA;
         recoveryThreshold = _initialRecoveryThreshold;
-        dailyLimit = 0;
-        lastResetDay = block.timestamp / 1 days;
+        initialized = false;
     }
 
     modifier onlyDelegatedEOA() {
@@ -46,31 +35,38 @@ contract HybridEOADelegateV3 {
         _;
     }
 
-    /**
-     * @notice Sets the daily spending limit for this EOA.
-     * @dev Can only be called by the delegated EOA.
-     * @param _newLimit The new spending limit in wei.
-     */
-    function setDailyLimit(uint256 _newLimit) external onlyDelegatedEOA {
-        dailyLimit = _newLimit;
-        emit DailyLimitSet(_newLimit);
+    modifier onlyOnce() {
+        require(!initialized, "HybridEOADelegate: Already initialized.");
+        _;
     }
 
-    /**
-     * @notice Sets or changes the approved sponsor address.
-     * @dev Can only be called by the delegated EOA.
-     * @param _sponsor The new sponsor address (address(0) to remove).
-     */
+    function initialize(
+        address _initialSponsor,
+        address[] memory _initialGuardians
+    ) external onlyDelegatedEOA onlyOnce {
+        if (_initialSponsor != address(0)) {
+            approvedSponsor = _initialSponsor;
+            emit SponsorSet(_initialSponsor);
+        }
+
+        for (uint256 i = 0; i < _initialGuardians.length; i++) {
+            address guardian = _initialGuardians[i];
+            require(guardian != address(0), "Guardian cannot be zero.");
+            require(!isGuardian[guardian], "Guardian already exists.");
+            isGuardian[guardian] = true;
+            guardianAddresses.push(guardian);
+            emit GuardianAdded(guardian);
+        }
+
+        initialized = true;
+        emit Initialized(msg.sender);
+    }
+
     function setApprovedSponsor(address _sponsor) external onlyDelegatedEOA {
         approvedSponsor = _sponsor;
         emit SponsorSet(_sponsor);
     }
 
-    /**
-     * @notice Adds an address as a guardian for account recovery.
-     * @dev Can only be called by the delegated EOA.
-     * @param _guardian The address to add as a guardian.
-     */
     function addGuardian(address _guardian) external onlyDelegatedEOA {
         require(_guardian != address(0), "Guardian cannot be zero.");
         require(!isGuardian[_guardian], "Guardian already exists.");
@@ -79,11 +75,6 @@ contract HybridEOADelegateV3 {
         emit GuardianAdded(_guardian);
     }
 
-    /**
-     * @notice Removes an address from the guardian list.
-     * @dev Can only be called by the delegated EOA.
-     * @param _guardian The address to remove.
-     */
     function removeGuardian(address _guardian) external onlyDelegatedEOA {
         require(isGuardian[_guardian], "Guardian not found.");
         isGuardian[_guardian] = false;
@@ -97,54 +88,27 @@ contract HybridEOADelegateV3 {
         emit GuardianRemoved(_guardian);
     }
 
-    /**
-     * @notice Changes the guardian recovery threshold.
-     * @dev Can only be called by the delegated EOA.
-     * @param _newThreshold The new threshold.
-     */
     function setRecoveryThreshold(uint256 _newThreshold) external onlyDelegatedEOA {
         require(_newThreshold > 0 && _newThreshold <= guardianAddresses.length, "Invalid threshold.");
         recoveryThreshold = _newThreshold;
     }
 
-    /**
-     * @notice Executes a single transaction call with daily spending limits.
-     * @dev Can only be called by the delegated EOA.
-     * @param _target The target address.
-     * @param _value The amount of Ether (wei) to send.
-     * @param _calldata The calldata for the target.
-     */
     function execute(address _target, uint256 _value, bytes memory _calldata)
         external
         onlyDelegatedEOA
         returns (bool success, bytes memory result)
     {
-        _checkAndApplyDailyLimit(_value);
         (success, result) = _target.call{value: _value}(_calldata);
         require(success, "HybridEOADelegate: Execution call failed.");
         return (success, result);
     }
 
-    /**
-     * @notice Executes multiple transaction calls in a single batch with daily spending limits.
-     * @dev Can only be called by the delegated EOA.
-     * @param _targets Array of target addresses.
-     * @param _values Array of Ether amounts (wei) for each target.
-     * @param _calldatas Array of calldata for each target.
-     * @return Array of boolean results for each call.
-     */
     function executeBatch(address[] memory _targets, uint256[] memory _values, bytes[] memory _calldatas)
         external
         onlyDelegatedEOA
         returns (bool[] memory successes)
     {
         require(_targets.length == _values.length && _targets.length == _calldatas.length, "HybridEOADelegate: Input array mismatch.");
-
-        uint256 totalValue = 0;
-        for (uint256 i = 0; i < _values.length; i++) {
-            totalValue += _values[i];
-        }
-        _checkAndApplyDailyLimit(totalValue);
 
         successes = new bool[](_targets.length);
         for (uint256 i = 0; i < _targets.length; i++) {
@@ -155,11 +119,6 @@ contract HybridEOADelegateV3 {
         return successes;
     }
 
-    /**
-     * @notice Initiates or votes for the EOA account recovery process.
-     * @dev Can be called by registered guardians.
-     * @param _newEOAOwner The proposed new EOA owner address.
-     */
     function initiateRecovery(address _newEOAOwner) external {
         require(isGuardian[msg.sender], "HybridEOADelegate: Only guardians can trigger recovery.");
         require(!_hasVotedForRecovery[msg.sender], "HybridEOADelegate: You have already voted.");
@@ -186,13 +145,6 @@ contract HybridEOADelegateV3 {
         }
     }
 
-    /**
-     * @notice Allows an 'approvedSponsor' to trigger an execution on behalf of the delegated EOA.
-     * @dev This simulates a Paymaster-like mechanism where the sponsor pays for the call.
-     * @param _target The target address.
-     * @param _value The amount of Ether (wei) to send (typically 0 if sponsored).
-     * @param _calldata The calldata for the target.
-     */
     function sponsoredExecute(address _target, uint256 _value, bytes memory _calldata)
         external
         returns (bool success, bytes memory result)
@@ -202,20 +154,6 @@ contract HybridEOADelegateV3 {
         (success, result) = _target.call{value: _value}(_calldata);
         require(success, "HybridEOADelegate: Sponsored call failed.");
         return (success, result);
-    }
-
-    function _checkAndApplyDailyLimit(uint256 _amount) internal {
-        if (dailyLimit == 0) return;
-
-        uint256 currentDay = block.timestamp / 1 days;
-        if (currentDay > lastResetDay) {
-            spentToday = 0;
-            lastResetDay = currentDay;
-        }
-
-        require(spentToday + _amount <= dailyLimit, "HybridEOADelegate: Daily spending limit exceeded.");
-        spentToday += _amount;
-        emit SpendingRecorded(_amount);
     }
 
     receive() external payable {}
