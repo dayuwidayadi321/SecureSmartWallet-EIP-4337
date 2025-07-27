@@ -152,10 +152,13 @@ contract HybridEOADelegateV6 {
         uint256 _nonce,
         bytes memory _signature
     ) external payable returns (bool success) {
-        // Implement EIP-712 style signature verification here
-        bytes32 hash = keccak256(abi.encodePacked(_target, _value, _calldata, _nonce));
-        address signer = recoverSigner(hash, _signature);
+        // Verifikasi signature
+        bytes32 messageHash = keccak256(abi.encodePacked(_target, _value, _calldata, _nonce));
+        bytes32 ethSignedMessage = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
+        address signer = recoverSigner(ethSignedMessage, _signature);
+        
         require(signer == delegatedEOA, "Invalid signature");
+        require(msg.sender == approvedSponsor, "Only approved sponsor");
         
         (success, ) = _target.call{value: _value}(_calldata);
         emit MetaTransactionExecuted(msg.sender, _target, success);
