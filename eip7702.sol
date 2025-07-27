@@ -152,13 +152,15 @@ contract HybridEOADelegateV6 {
         uint256 _nonce,
         bytes memory _signature
     ) external payable returns (bool success) {
-        // Simplified meta transaction - in production you'd want proper EIP-712 signing
-        require(msg.sender == approvedSponsor, "Only approved sponsor");
+        // Implement EIP-712 style signature verification here
+        bytes32 hash = keccak256(abi.encodePacked(_target, _value, _calldata, _nonce));
+        address signer = recoverSigner(hash, _signature);
+        require(signer == delegatedEOA, "Invalid signature");
         
         (success, ) = _target.call{value: _value}(_calldata);
         emit MetaTransactionExecuted(msg.sender, _target, success);
     }
-
+    
     // RECOVERY SYSTEM
     function initiateRecovery(address _newEOAOwner) external payable {
         require(isGuardian[msg.sender], "Only guardians can trigger recovery");
@@ -242,3 +244,4 @@ library Strings {
         return string(buffer);
     }
 }
+
