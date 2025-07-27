@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-contract HybridEOADelegateV5 {
-    address public delegatedEOA;  // Changed from immutable to allow recovery
+import "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts/proxy/utils/Initializable.sol";
+
+contract HybridEOADelegateV6 is Initializable, UUPSUpgradeable {
+    address public delegatedEOA;
     mapping(address => bool) public isGuardian;
     address[] public guardianAddresses;
     uint256 public recoveryThreshold;
@@ -13,7 +16,7 @@ contract HybridEOADelegateV5 {
     address private _proposedNewEOAOwner;
 
     address public approvedSponsor;
-    bool public initialized;
+    bool private _initialized;
 
     // Events
     event GuardianAdded(address indexed guardian);
@@ -24,34 +27,24 @@ contract HybridEOADelegateV5 {
     event Initialized(address indexed initializer);
     event DelegatedEOAUpdated(address indexed oldEOA, address indexed newEOA);
 
-    constructor(address _initialDelegatedEOA, uint256 _initialRecoveryThreshold) {
-        require(_initialDelegatedEOA != address(0), "Delegated EOA cannot be zero.");
-        delegatedEOA = _initialDelegatedEOA;
-        setRecoveryThreshold(_initialRecoveryThreshold);
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() initializer {
+        // Mencegah implementasi kontrak diinisialisasi
+        _disableInitializers();
     }
 
-    // MODIFIERS - Simplified and more flexible
-    modifier onlyDelegatedEOA() {
-        require(tx.origin == delegatedEOA, "Only delegated EOA can trigger this");
-        _;
-    }
-
-    modifier onlyDelegatedEOAOrSelf() {
-        require(msg.sender == address(this) || tx.origin == delegatedEOA, 
-            "Only delegated EOA or contract itself");
-        _;
-    }
-
-    modifier onlyOnce() {
-        require(!initialized, "Already initialized");
-        _;
-    }
-
-    // INITIALIZATION - More flexible
     function initialize(
+        address _initialDelegatedEOA,
+        uint256 _initialRecoveryThreshold,
         address _initialSponsor,
         address[] memory _initialGuardians
-    ) external onlyDelegatedEOAOrSelf onlyOnce {
+    ) public initializer {
+        require(_initialDelegatedEOA != address(0), "Delegated EOA cannot be zero");
+        __UUPSUpgradeable_init();
+        
+        delegatedEOA = _initialDelegatedEOA;
+        setRecoveryThreshold(_initialRecoveryThreshold);
+        
         if (_initialSponsor != address(0)) {
             approvedSponsor = _initialSponsor;
             emit SponsorSet(_initialSponsor);
@@ -61,11 +54,23 @@ contract HybridEOADelegateV5 {
             _addGuardian(_initialGuardians[i]);
         }
 
-        initialized = true;
+        _initialized = true;
         emit Initialized(msg.sender);
     }
 
-    // ADMIN FUNCTIONS - More flexible access
+    // MODIFIERS
+    modifier onlyDelegatedEOA() {
+        require(tx.origin == delegatedEOA, "Only delegated EOA");
+        _;
+    }
+
+    modifier onlyDelegatedEOAOrSelf() {
+        require(msg.sender == address(this) || tx.origin == delegatedEOA, 
+            "Only delegated EOA or contract");
+        _;
+    }
+
+    // ADMIN FUNCTIONS
     function setApprovedSponsor(address _sponsor) external onlyDelegatedEOAOrSelf {
         approvedSponsor = _sponsor;
         emit SponsorSet(_sponsor);
@@ -76,7 +81,7 @@ contract HybridEOADelegateV5 {
     }
 
     function _addGuardian(address _guardian) internal {
-        require(_guardian != address(0), "Invalid guardian address");
+        require(_guardian != address(0), "Invalid guardian");
         if (!isGuardian[_guardian]) {
             isGuardian[_guardian] = true;
             guardianAddresses.push(_guardian);
@@ -103,41 +108,51 @@ contract HybridEOADelegateV5 {
         recoveryThreshold = _newThreshold;
     }
 
-    // EXECUTION FUNCTIONS - More flexible
+    // PAYABLE EXECUTION FUNCTIONS
     function execute(address _target, uint256 _value, bytes memory _calldata)
         external
+        payable  // <-- Ditambahkan payable
         onlyDelegatedEOAOrSelf
-        returns (bool success, bytes memory result)
+        returns (bytes memory)
     {
-        (success, result) = _target.call{value: _value}(_calldata);
-        if (!success) {
-            revert("Execution call failed");
-        }
+        require(msg.value == _value, "Value mismatch");
+        (bool success, bytes memory result) = _target.call{value: _value}(_calldata);
+        require(success, "Execution failed");
+        return result;
     }
 
-    function executeBatch(address[] memory _targets, uint256[] memory _values, bytes[] memory _calldatas)
+    function executeBatch(
+        address[] memory _targets, 
+        uint256[] memory _values, 
+        bytes[] memory _calldatas
+    )
         external
+        payable  // <-- Ditambahkan payable
         onlyDelegatedEOAOrSelf
         returns (bool[] memory successes)
     {
-        require(_targets.length == _values.length, "Input array length mismatch");
-        require(_targets.length == _calldatas.length, "Input array length mismatch");
+        require(_targets.length == _values.length, "Length mismatch");
+        require(_targets.length == _calldatas.length, "Length mismatch");
+        
+        uint256 totalValue;
+        for (uint256 i = 0; i < _values.length; i++) {
+            totalValue += _values[i];
+        }
+        require(msg.value == totalValue, "Total value mismatch");
 
         successes = new bool[](_targets.length);
         for (uint256 i = 0; i < _targets.length; i++) {
             (bool success, ) = _targets[i].call{value: _values[i]}(_calldatas[i]);
             successes[i] = success;
-            if (!success) {
-                revert(string(abi.encodePacked("Batch call failed at index ", Strings.toString(i))));
-            }
+            require(success, string(abi.encodePacked("Call failed at: ", Strings.toString(i))));
         }
     }
 
-    // RECOVERY SYSTEM - More flexible
+    // RECOVERY SYSTEM
     function initiateRecovery(address _newEOAOwner) external {
-        require(isGuardian[msg.sender], "Only guardians can trigger recovery");
+        require(isGuardian[msg.sender], "Only guardians");
         require(!_hasVotedForRecovery[msg.sender], "Already voted");
-        require(_newEOAOwner != address(0), "Invalid new owner address");
+        require(_newEOAOwner != address(0), "Invalid address");
 
         if (_recoveryVoteCount == 0) {
             _proposedNewEOAOwner = _newEOAOwner;
@@ -159,7 +174,6 @@ contract HybridEOADelegateV5 {
         address oldEOA = delegatedEOA;
         delegatedEOA = _proposedNewEOAOwner;
         
-        // Reset recovery state
         _recoveryVoteCount = 0;
         _proposedNewEOAOwner = address(0);
         
@@ -171,17 +185,25 @@ contract HybridEOADelegateV5 {
         emit DelegatedEOAUpdated(oldEOA, delegatedEOA);
     }
 
-    // SPONSORED FUNCTIONS
+    // SPONSORED FUNCTIONS (payable)
     function sponsoredExecute(address _target, uint256 _value, bytes memory _calldata)
         external
-        returns (bool success, bytes memory result)
+        payable  // <-- Ditambahkan payable
+        returns (bytes memory)
     {
-        require(msg.sender == approvedSponsor, "Only approved sponsor");
-        (success, result) = _target.call{value: _value}(_calldata);
-        if (!success) {
-            revert("Sponsored call failed");
-        }
+        require(msg.sender == approvedSponsor, "Only sponsor");
+        require(msg.value == _value, "Value mismatch");
+        (bool success, bytes memory result) = _target.call{value: _value}(_calldata);
+        require(success, "Sponsored call failed");
+        return result;
     }
+
+    // UPGRADE FUNCTIONALITY
+    function _authorizeUpgrade(address newImplementation) 
+        internal 
+        override 
+        onlyDelegatedEOAOrSelf 
+    {}
 
     // HELPER FUNCTIONS
     function getGuardianCount() external view returns (uint256) {
@@ -189,7 +211,7 @@ contract HybridEOADelegateV5 {
     }
 
     function getGuardianAt(uint256 index) external view returns (address) {
-        require(index < guardianAddresses.length, "Index out of bounds");
+        require(index < guardianAddresses.length, "Invalid index");
         return guardianAddresses[index];
     }
 
@@ -201,14 +223,12 @@ contract HybridEOADelegateV5 {
 library Strings {
     function toString(uint256 value) internal pure returns (string memory) {
         if (value == 0) return "0";
-        
         uint256 temp = value;
         uint256 digits;
         while (temp != 0) {
             digits++;
             temp /= 10;
         }
-        
         bytes memory buffer = new bytes(digits);
         while (value != 0) {
             digits--;
