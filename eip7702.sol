@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-
-contract HybridEOADelegateV6 is Initializable, UUPSUpgradeable {
+contract HybridEOADelegateV6 {
     address public delegatedEOA;
     mapping(address => bool) public isGuardian;
     address[] public guardianAddresses;
@@ -16,7 +13,7 @@ contract HybridEOADelegateV6 is Initializable, UUPSUpgradeable {
     address private _proposedNewEOAOwner;
 
     address public approvedSponsor;
-    bool private _initialized;
+    bool public initialized;
 
     // Events
     event GuardianAdded(address indexed guardian);
@@ -26,25 +23,36 @@ contract HybridEOADelegateV6 is Initializable, UUPSUpgradeable {
     event SponsorSet(address indexed sponsor);
     event Initialized(address indexed initializer);
     event DelegatedEOAUpdated(address indexed oldEOA, address indexed newEOA);
+    event MetaTransactionExecuted(address indexed relayer, address indexed target, bool success);
 
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() initializer {
-        // Mencegah implementasi kontrak diinisialisasi
-        _disableInitializers();
-    }
-
-    function initialize(
-        address _initialDelegatedEOA,
-        uint256 _initialRecoveryThreshold,
-        address _initialSponsor,
-        address[] memory _initialGuardians
-    ) public initializer {
-        require(_initialDelegatedEOA != address(0), "Delegated EOA cannot be zero");
-        __UUPSUpgradeable_init();
-        
+    constructor(address _initialDelegatedEOA, uint256 _initialRecoveryThreshold) {
+        require(_initialDelegatedEOA != address(0), "Delegated EOA cannot be zero.");
         delegatedEOA = _initialDelegatedEOA;
         setRecoveryThreshold(_initialRecoveryThreshold);
-        
+    }
+
+    // MODIFIERS
+    modifier onlyDelegatedEOA() {
+        require(tx.origin == delegatedEOA, "Only delegated EOA can trigger this");
+        _;
+    }
+
+    modifier onlyDelegatedEOAOrSelf() {
+        require(msg.sender == address(this) || tx.origin == delegatedEOA, 
+            "Only delegated EOA or contract itself");
+        _;
+    }
+
+    modifier onlyOnce() {
+        require(!initialized, "Already initialized");
+        _;
+    }
+
+    // INITIALIZATION
+    function initialize(
+        address _initialSponsor,
+        address[] memory _initialGuardians
+    ) external payable onlyDelegatedEOAOrSelf onlyOnce {
         if (_initialSponsor != address(0)) {
             approvedSponsor = _initialSponsor;
             emit SponsorSet(_initialSponsor);
@@ -54,34 +62,22 @@ contract HybridEOADelegateV6 is Initializable, UUPSUpgradeable {
             _addGuardian(_initialGuardians[i]);
         }
 
-        _initialized = true;
+        initialized = true;
         emit Initialized(msg.sender);
     }
 
-    // MODIFIERS
-    modifier onlyDelegatedEOA() {
-        require(tx.origin == delegatedEOA, "Only delegated EOA");
-        _;
-    }
-
-    modifier onlyDelegatedEOAOrSelf() {
-        require(msg.sender == address(this) || tx.origin == delegatedEOA, 
-            "Only delegated EOA or contract");
-        _;
-    }
-
     // ADMIN FUNCTIONS
-    function setApprovedSponsor(address _sponsor) external onlyDelegatedEOAOrSelf {
+    function setApprovedSponsor(address _sponsor) external payable onlyDelegatedEOAOrSelf {
         approvedSponsor = _sponsor;
         emit SponsorSet(_sponsor);
     }
 
-    function addGuardian(address _guardian) external onlyDelegatedEOAOrSelf {
+    function addGuardian(address _guardian) external payable onlyDelegatedEOAOrSelf {
         _addGuardian(_guardian);
     }
 
     function _addGuardian(address _guardian) internal {
-        require(_guardian != address(0), "Invalid guardian");
+        require(_guardian != address(0), "Invalid guardian address");
         if (!isGuardian[_guardian]) {
             isGuardian[_guardian] = true;
             guardianAddresses.push(_guardian);
@@ -89,7 +85,7 @@ contract HybridEOADelegateV6 is Initializable, UUPSUpgradeable {
         }
     }
 
-    function removeGuardian(address _guardian) external onlyDelegatedEOAOrSelf {
+    function removeGuardian(address _guardian) external payable onlyDelegatedEOAOrSelf {
         require(isGuardian[_guardian], "Guardian not found");
         isGuardian[_guardian] = false;
         
@@ -103,7 +99,7 @@ contract HybridEOADelegateV6 is Initializable, UUPSUpgradeable {
         emit GuardianRemoved(_guardian);
     }
 
-    function setRecoveryThreshold(uint256 _newThreshold) public onlyDelegatedEOAOrSelf {
+    function setRecoveryThreshold(uint256 _newThreshold) public payable onlyDelegatedEOAOrSelf {
         require(_newThreshold > 0, "Threshold must be positive");
         recoveryThreshold = _newThreshold;
     }
@@ -111,7 +107,7 @@ contract HybridEOADelegateV6 is Initializable, UUPSUpgradeable {
     // PAYABLE EXECUTION FUNCTIONS
     function execute(address _target, uint256 _value, bytes memory _calldata)
         external
-        payable  // <-- Ditambahkan payable
+        payable
         onlyDelegatedEOAOrSelf
         returns (bytes memory)
     {
@@ -127,7 +123,7 @@ contract HybridEOADelegateV6 is Initializable, UUPSUpgradeable {
         bytes[] memory _calldatas
     )
         external
-        payable  // <-- Ditambahkan payable
+        payable
         onlyDelegatedEOAOrSelf
         returns (bool[] memory successes)
     {
@@ -148,11 +144,26 @@ contract HybridEOADelegateV6 is Initializable, UUPSUpgradeable {
         }
     }
 
+    // META TRANSACTION SUPPORT
+    function metaExecute(
+        address _target,
+        uint256 _value,
+        bytes memory _calldata,
+        uint256 _nonce,
+        bytes memory _signature
+    ) external payable returns (bool success) {
+        // Simplified meta transaction - in production you'd want proper EIP-712 signing
+        require(msg.sender == approvedSponsor, "Only approved sponsor");
+        
+        (success, ) = _target.call{value: _value}(_calldata);
+        emit MetaTransactionExecuted(msg.sender, _target, success);
+    }
+
     // RECOVERY SYSTEM
-    function initiateRecovery(address _newEOAOwner) external {
-        require(isGuardian[msg.sender], "Only guardians");
+    function initiateRecovery(address _newEOAOwner) external payable {
+        require(isGuardian[msg.sender], "Only guardians can trigger recovery");
         require(!_hasVotedForRecovery[msg.sender], "Already voted");
-        require(_newEOAOwner != address(0), "Invalid address");
+        require(_newEOAOwner != address(0), "Invalid new owner address");
 
         if (_recoveryVoteCount == 0) {
             _proposedNewEOAOwner = _newEOAOwner;
@@ -188,7 +199,7 @@ contract HybridEOADelegateV6 is Initializable, UUPSUpgradeable {
     // SPONSORED FUNCTIONS (payable)
     function sponsoredExecute(address _target, uint256 _value, bytes memory _calldata)
         external
-        payable  // <-- Ditambahkan payable
+        payable
         returns (bytes memory)
     {
         require(msg.sender == approvedSponsor, "Only sponsor");
@@ -197,13 +208,6 @@ contract HybridEOADelegateV6 is Initializable, UUPSUpgradeable {
         require(success, "Sponsored call failed");
         return result;
     }
-
-    // UPGRADE FUNCTIONALITY
-    function _authorizeUpgrade(address newImplementation) 
-        internal 
-        override 
-        onlyDelegatedEOAOrSelf 
-    {}
 
     // HELPER FUNCTIONS
     function getGuardianCount() external view returns (uint256) {
@@ -238,4 +242,3 @@ library Strings {
         return string(buffer);
     }
 }
-
